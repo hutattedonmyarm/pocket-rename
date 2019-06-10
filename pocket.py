@@ -6,7 +6,8 @@ __author__ = 'max.nuding@icloud.com'
 __version__ = '0.1'
 
 from urllib import request, parse, error as urllib_error
-from typing import List, Dict
+from typing import List, Dict, Tuple
+import dataclasses
 import webbrowser
 import json
 
@@ -21,8 +22,17 @@ REDIRECT_URI = 'https://github.com/hutattedonmyarm/pocket-rename'
 Parameter = Dict[str, str]
 
 # TODO: Test if access token is valid
-# TODO: Type hinting
-# TODO: Docstring
+
+@dataclasses.dataclass
+class Article:
+    """A Pocket Article"""
+    item_id: str
+    given_url: str
+    resolved_url: str
+    given_title: str
+    resolved_title: str
+    tags: List[str]
+    time_added: str
 
 class Pocket:
     """Provides access to the Pocket API"""
@@ -81,11 +91,56 @@ class Pocket:
         """
         # detailType simple is probably default, but the docs make no statement regarding that
         parameters = {
-            'detailType': 'simple',
+            'detailType': 'complete',
             'state': state
         }
         resp = self._make_request('/get', parameters=parameters).read()
-        return resp
+        resp = json.loads(resp)['list']
+        articles = [Article(item_id,
+                            a['given_url'],
+                            a['resolved_url'],
+                            a['given_title'],
+                            a['resolved_title'],
+                            [*a.get('tags', {})],
+                            a['time_added']) for item_id, a in resp.items()]
+        return articles
+
+    def rename_article(self, article: Article, new_name: str, clean_url=True) -> Article:
+        """Renames a Pocket article by removing and readding it,
+        while keeping the original tags and the timemstamp
+
+        Arguments:
+            article {Article} -- The article to be renamed
+            new_name {str} -- The new title of the article
+
+        Keyword Arguments:
+            clean_url {bool} -- Replace the original url with Pocket's
+            resolved url (default: {True})
+
+        Returns:
+            Article -- The new article
+        """
+        pass
+
+    def add_tags(self, article: Article, tags: List[str]) -> Article:
+        """Adds tags to an article
+        Arguments:
+            article {Article} -- The article
+            tags {List[str]} -- List of tags to add
+        """
+        resp = self._send_action('tags_add', article, ('tags', ','.join(tags)))
+        return json.loads(resp.read())
+
+    def _send_action(self, action: str, article: Article, action_value: Tuple[str, str]):
+        params = {
+            'actions':
+            [{
+                'action': action,
+                'item_id': article.item_id,
+                action_value[0]: action_value[1]
+            }]
+        }
+        return self._make_request('/send', params)
 
     def _make_request(self,
                       endpoint: str,
@@ -102,21 +157,25 @@ class Pocket:
             'consumer_key' : self.consumer_key
         }
         params.update(parameters)
-        request_headers = {'X-Accept': 'application/json'}
+        request_headers = {
+            'X-Accept': 'application/json',
+            'Content-Type': 'application/json'
+        }
         request_headers.update(headers)
-        data = parse.urlencode(params).encode()
+        data = json.dumps(params).encode('utf-8')
         req = request.Request(url, data=data, headers=request_headers)
         resp = request.urlopen(req)
-
         return resp
 
-class Article:
-    """A Pocket Article"""
-    pass
+class DataClassJSONEncoder(json.JSONEncoder):
+    """JSON Encoder to encode dataclasses"""
+    def default(self, o):
+        if dataclasses.is_dataclass(o):
+            return dataclasses.asdict(o)
+        return super().default(o)
 
 class PocketException(Exception):
     """General Pocket Exception"""
-    pass
 
 class InvalidConsumerKey(PocketException):
     """Invalid Consumer Key Exception"""

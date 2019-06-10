@@ -28,4 +28,4 @@ if __name__ == "__main__":
         # because we have read at the beginning and moved the stream position
         f.seek(0)
         json.dump(CONFIG, f, indent=4)
-    print(APP.get_articles())
+    articles = APP.get_articles()
