@@ -11,15 +11,15 @@ import json
 
 BASE_URL = 'https://getpocket.com/v3'
 
-REQUEST_TOKEN_URL = BASE_URL+'/oauth/request'
+REQUEST_TOKEN_URL = '/oauth/request'
 AUTHORIZE_REQUEST_URL = "https://getpocket.com/auth/authorize"
-AUTHORIZE_REQUEST_TOKEN = BASE_URL+'/oauth/authorize'
+AUTHORIZE_REQUEST_TOKEN = '/oauth/authorize'
 
 REDIRECT_URI = 'https://github.com/hutattedonmyarm/pocket-rename'
 
 # TODO: Test if access token is valid
-# TODO: Some kind of _make_request()
 # TODO: Type hinting
+# TODO: Docstring
 
 class Pocket:
     consumer_key = None
@@ -33,44 +33,28 @@ class Pocket:
             self._get_access_token()
     
     def _get_access_token(self, redirect_uri = REDIRECT_URI):
-        parameters = {
-            'consumer_key' : self.consumer_key,
-            'redirect_uri' : redirect_uri 
-        }
-        
-        headers = { 'X-Accept': 'application/json' }
-        data = parse.urlencode(parameters).encode()
-        req =  request.Request(REQUEST_TOKEN_URL, data=data, headers=headers) # this will make the method "POST"
+        parameters = { 'redirect_uri' : redirect_uri }      
         try:
-            resp = request.urlopen(req)
-            
+            resp = self._make_request(REQUEST_TOKEN_URL, parameters=parameters)  
         except urllib_error.HTTPError as e:
             if e.code == 403:
                 raise InvalidConsumerKey(self.consumer_key)
+            else:
+                raise PocketException(f'{e.code} - {e.reason}: {e.msg}')
         except Exception as e:
             raise PocketException(e)
 
         response_dict = json.loads(resp.read())
         request_token = response_dict['code']
-
         parameters = {
             'request_token' : request_token,
             'redirect_uri' : redirect_uri
         }
-
         webbrowser.open(AUTHORIZE_REQUEST_URL + '?' + parse.urlencode(parameters))
 
-        parameters = {
-            'consumer_key' : self.consumer_key,
-            'code' : request_token
-        }
-
+        parameters = { 'code' : request_token }
         input('Please authorize me and hit enter')
-
-        data = parse.urlencode(parameters).encode()
-        req = request.Request(AUTHORIZE_REQUEST_TOKEN, data=data, headers=headers)
-        resp = request.urlopen(req)
-
+        resp = self._make_request(AUTHORIZE_REQUEST_TOKEN, parameters=parameters)
         access_token_dict = json.loads(resp.read())
         self.access_token = access_token_dict['access_token']
         self.username = access_token_dict['username']
@@ -81,16 +65,28 @@ class Pocket:
         return True
 
     def get_articles(self):
-        url = BASE_URL+'/get'
-        headers = { 'X-Accept': 'application/json' }
-        parameters = {
+        # detailType simple is probably default, but the docs make no statement regarding that
+        parameters = { 'detailType': 'simple' }
+        resp = self._make_request('/get', parameters=parameters).read()
+        return resp
+
+    def _make_request(self, endpoint, parameters = None, headers = None):
+        # Handles relative and absolute (e.g. for authentication) endpoints
+        url = BASE_URL+endpoint if endpoint.startswith('/') else endpoint
+        # Using empty dictionaries as default values causes all sorts of troubles in python
+        # So 'None' is used with an initialization to an empty dict
+        parameters = {} if parameters is None else parameters
+        headers = {} if headers is None else headers
+        params = {
             'access_token' : self.access_token,
-            'consumer_key' : self.consumer_key,
-            'detailType': 'simple '
+            'consumer_key' : self.consumer_key
         }
-        data = parse.urlencode(parameters).encode()
-        req = request.Request(url, data=data, headers=headers)
-        resp = request.urlopen(req).read()
+        params.update(parameters)
+        request_headers = { 'X-Accept': 'application/json' }
+        request_headers.update(headers)
+        data = parse.urlencode(params).encode()
+        req = request.Request(url, data=data, headers=request_headers)
+        resp = request.urlopen(req)
         return resp
 
 class PocketException(Exception):
