@@ -1,48 +1,53 @@
 #!/usr/bin/env python
 
-'''Provides communication with the Pocket API'''
+"""Provides communication with the Pocket API"""
 
 __author__ = 'max.nuding@icloud.com'
 __version__ = '0.1'
 
 from urllib import request, parse, error as urllib_error
+from typing import List, Dict
 import webbrowser
 import json
 
 BASE_URL = 'https://getpocket.com/v3'
 
 REQUEST_TOKEN_URL = '/oauth/request'
-AUTHORIZE_REQUEST_URL = "https://getpocket.com/auth/authorize"
+AUTHORIZE_REQUEST_URL = 'https://getpocket.com/auth/authorize'
 AUTHORIZE_REQUEST_TOKEN = '/oauth/authorize'
 
 REDIRECT_URI = 'https://github.com/hutattedonmyarm/pocket-rename'
+
+Parameter = Dict[str, str]
 
 # TODO: Test if access token is valid
 # TODO: Type hinting
 # TODO: Docstring
 
 class Pocket:
+    """Provides access to the Pocket API"""
     consumer_key = None
     access_token = None
     username = None
     request_token = None
-    def __init__(self, consumer_key, access_token = None):
+    def __init__(self, consumer_key, access_token=None):
         self.consumer_key = consumer_key
         self.access_token = access_token
         if not self._test_access_token():
             self._get_access_token()
-    
-    def _get_access_token(self, redirect_uri = REDIRECT_URI):
-        parameters = { 'redirect_uri' : redirect_uri }      
+
+    def _get_access_token(self, redirect_uri: str = REDIRECT_URI) -> None:
+        parameters = {'redirect_uri' : redirect_uri}
         try:
-            resp = self._make_request(REQUEST_TOKEN_URL, parameters=parameters)  
-        except urllib_error.HTTPError as e:
-            if e.code == 403:
+            resp = self._make_request(REQUEST_TOKEN_URL, parameters=parameters)
+        except urllib_error.HTTPError as http_exception:
+            if http_exception.code == 403:
                 raise InvalidConsumerKey(self.consumer_key)
             else:
-                raise PocketException(f'{e.code} - {e.reason}: {e.msg}')
-        except Exception as e:
-            raise PocketException(e)
+                raise PocketException(
+                    f'{http_exception.code} - {http_exception.reason}: {http_exception.msg}')
+        except Exception as exception:
+            raise PocketException(exception)
 
         response_dict = json.loads(resp.read())
         request_token = response_dict['code']
@@ -52,25 +57,40 @@ class Pocket:
         }
         webbrowser.open(AUTHORIZE_REQUEST_URL + '?' + parse.urlencode(parameters))
 
-        parameters = { 'code' : request_token }
+        parameters = {'code' : request_token}
         input('Please authorize me and hit enter')
         resp = self._make_request(AUTHORIZE_REQUEST_TOKEN, parameters=parameters)
         access_token_dict = json.loads(resp.read())
         self.access_token = access_token_dict['access_token']
         self.username = access_token_dict['username']
-    
-    def _test_access_token(self):
+
+    def _test_access_token(self) -> bool:
         if not self.access_token:
             return False
         return True
 
-    def get_articles(self):
+    def get_articles(self, state: str = 'unread') -> List[Article]:
+        """Fetches all unread items from pocket
+
+        Keyword Arguments:
+            state {str} -- filter items by state:
+                'unread', 'archive', or 'all' (default: {'unread'})
+
+        Returns:
+            List[Article] -- A list of pocket articles
+        """
         # detailType simple is probably default, but the docs make no statement regarding that
-        parameters = { 'detailType': 'simple' }
+        parameters = {
+            'detailType': 'simple',
+            'state': state
+        }
         resp = self._make_request('/get', parameters=parameters).read()
         return resp
 
-    def _make_request(self, endpoint, parameters = None, headers = None):
+    def _make_request(self,
+                      endpoint: str,
+                      parameters: Parameter = None,
+                      headers: Parameter = None) -> request.Request:
         # Handles relative and absolute (e.g. for authentication) endpoints
         url = BASE_URL+endpoint if endpoint.startswith('/') else endpoint
         # Using empty dictionaries as default values causes all sorts of troubles in python
@@ -82,17 +102,24 @@ class Pocket:
             'consumer_key' : self.consumer_key
         }
         params.update(parameters)
-        request_headers = { 'X-Accept': 'application/json' }
+        request_headers = {'X-Accept': 'application/json'}
         request_headers.update(headers)
         data = parse.urlencode(params).encode()
         req = request.Request(url, data=data, headers=request_headers)
         resp = request.urlopen(req)
+
         return resp
 
+class Article:
+    """A Pocket Article"""
+    pass
+
 class PocketException(Exception):
+    """General Pocket Exception"""
     pass
 
 class InvalidConsumerKey(PocketException):
+    """Invalid Consumer Key Exception"""
     consumer_key = None
     def __init__(self, consumer_key):
         self.consumer_key = consumer_key
