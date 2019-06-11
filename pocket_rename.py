@@ -6,7 +6,6 @@ import json
 import sys
 import pocket
 
-
 CONFIG_FILE_PATH = 'config.json'
 
 if __name__ == "__main__":
@@ -29,3 +28,8 @@ if __name__ == "__main__":
         f.seek(0)
         json.dump(CONFIG, f, indent=4)
     articles = APP.get_articles()
+    print('Articles in list')
+    # +1 so the displayed numbmering starts at 1
+    _ = [print(f'{idx+1}. {article.resolved_title}: {article.resolved_url}')
+         for idx, article in enumerate(articles)]
+    #print(res)

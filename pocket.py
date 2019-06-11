@@ -6,7 +6,7 @@ __author__ = 'max.nuding@icloud.com'
 __version__ = '0.1'
 
 from urllib import request, parse, error as urllib_error
-from typing import List, Dict, Tuple
+from typing import List, Dict
 import dataclasses
 import webbrowser
 import json
@@ -79,6 +79,20 @@ class Pocket:
             return False
         return True
 
+    @staticmethod
+    def _parse_article(item_id: str, article_data: Dict[str, any]) -> Article:
+        title = article_data.get('resolved_title')
+        if not title:
+            title = article_data.get('title')
+
+        return Article(item_id,
+                       article_data['given_url'],
+                       article_data['resolved_url'],
+                       article_data.get('given_title'),
+                       title,
+                       [*article_data.get('tags', {})],
+                       article_data.get('time_added'))
+
     def get_articles(self, state: str = 'unread') -> List[Article]:
         """Fetches all unread items from pocket
 
@@ -96,13 +110,7 @@ class Pocket:
         }
         resp = self._make_request('/get', parameters=parameters).read()
         resp = json.loads(resp)['list']
-        articles = [Article(item_id,
-                            a['given_url'],
-                            a['resolved_url'],
-                            a['given_title'],
-                            a['resolved_title'],
-                            [*a.get('tags', {})],
-                            a['time_added']) for item_id, a in resp.items()]
+        articles = [self._parse_article(item_id, a) for item_id, a in resp.items()]
         return articles
 
     def rename_article(self, article: Article, new_name: str, clean_url=True) -> Article:
@@ -120,27 +128,92 @@ class Pocket:
         Returns:
             Article -- The new article
         """
-        pass
+        tags = article.tags
+        url = article.resolved_url if clean_url else article.given_url
+        time_added = article.time_added
+        self.remove_item(article)
+        return self.add_item(url, new_name, tags, time_added)
 
-    def add_tags(self, article: Article, tags: List[str]) -> Article:
+
+    def add_tags(self, article: Article, tags: List[str]) -> bool:
         """Adds tags to an article
         Arguments:
             article {Article} -- The article
             tags {List[str]} -- List of tags to add
+        Returns:
+            bool -- Success
         """
-        resp = self._send_action('tags_add', article, ('tags', ','.join(tags)))
-        return json.loads(resp.read())
-
-    def _send_action(self, action: str, article: Article, action_value: Tuple[str, str]):
-        params = {
-            'actions':
-            [{
-                'action': action,
-                'item_id': article.item_id,
-                action_value[0]: action_value[1]
-            }]
+        action = {
+            'item_id': article.item_id,
+            'tags': ','.join(tags)
         }
-        return self._make_request('/send', params)
+        return self._send_action('tags_add', action)[0]
+
+    def remove_item(self, article: Article) -> bool:
+        """Removes an article from the list
+        Arguments:
+            article {Article} -- The article to remove
+        Returns:
+            bool -- Success
+        """
+        action = {'item_id': article.item_id}
+        return self._send_action('delete', action)[0]
+
+    def add_item(self,
+                 url: str,
+                 title: str = None,
+                 tags: List[str] = None,
+                 time_added: str = None) -> Article:
+        """Adds an item to the list
+
+        Arguments:
+            url {str} -- The URL of the item
+
+        Keyword Arguments:
+            title {str} -- The title of the new item.
+            Will be ignored if Pocket is able to parse the title itself (default: {None})
+            tags {List[str]} -- A list of tags for the item (default: {None})
+            time_added {str} -- Timestamp when this item was added (default: {None})
+
+        Returns:
+            Article -- The newly added Pocket article
+        """
+        params = {'url': url}
+        if title:
+            params['title'] = title
+        if tags:
+            params['tags'] = ','.join(tags)
+        if time_added:
+            params['time'] = time_added
+            # Adding with a timestamp is only possible using the /send endpoint,
+            # and not the /add endpoint
+            return self._add_item_timestamp(params)
+        # The item returned by the /add endpoint is different from the regular one
+        # Might be better to go agains Pocket's recommendation and also use the /send endpoint here
+        resp = json.loads(self._make_request('/add', params).read())['item']
+        return self._parse_article(resp['item_id'], resp)
+
+    def _add_item_timestamp(self, params: Dict[str, str]) -> Article:
+        """Adds an item with a timestamp to the list
+
+        Arguments:
+            params {Dict[str, str]} -- Item paramemters (url, title, time)
+
+        Returns:
+            Article -- The added item
+        """
+        new_item = self._send_action('add', params)[0]
+        article = self._parse_article(new_item['item_id'], new_item)
+        return article
+
+    def _send_action(self,
+                     action_name: str,
+                     action: Dict[str, str] = None) -> List[bool]:
+        action['action'] = action_name
+        params = {'actions': [action]}
+        resp = self._make_request('/send', params)
+        resp_text = resp.read()
+        return json.loads(resp_text)['action_results']
 
     def _make_request(self,
                       endpoint: str,
