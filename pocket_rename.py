@@ -50,13 +50,16 @@ if __name__ == "__main__":
         for idx, article in enumerate(ARTICLES):
             ARTICLE_STRING = get_article_string(article)
             print(f'{idx+1}. {ARTICLE_STRING}')
-        SELECTED_ARTICLE = input('Select an article you wish to rename: ')
         SELECTED_INDEX = None
+        ERROR_MESSAGE = 'Please select a valid number from the list'
         while SELECTED_INDEX is None:
-            ERROR_MESSAGE = 'Please select a valid number from the list'
+            SELECTED_ARTICLE = input('Select an article you wish to rename: (q to quit) ')
+            if SELECTED_ARTICLE is 'q':
+                sys.exit(0)
             try:
                 SELECTED_INDEX = int(SELECTED_ARTICLE) - 1
                 if SELECTED_INDEX < 0 or SELECTED_INDEX >= len(ARTICLES):
+                    SELECTED_INDEX = None
                     print(ERROR_MESSAGE)
             except ValueError as error:
                 print(ERROR_MESSAGE)

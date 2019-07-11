@@ -21,8 +21,6 @@ REDIRECT_URI = 'https://github.com/hutattedonmyarm/pocket-rename'
 
 Parameter = Dict[str, str]
 
-# TODO: Test if access token is valid
-
 @dataclasses.dataclass
 class Article:
     """A Pocket Article"""
@@ -76,6 +74,13 @@ class Pocket:
 
     def _test_access_token(self) -> bool:
         if not self.access_token:
+            return False
+        parameters = {
+            'count': 1
+        }
+        try:
+            _ = self._make_request('/get', parameters=parameters).read()
+        except InvalidAccessToken:
             return False
         return True
 
@@ -237,7 +242,14 @@ class Pocket:
         request_headers.update(headers)
         data = json.dumps(params).encode('utf-8')
         req = request.Request(url, data=data, headers=request_headers)
-        resp = request.urlopen(req)
+        try:
+            resp = request.urlopen(req)
+        except urllib_error.HTTPError as http_exception:
+            if http_exception.code == 401:
+                raise InvalidAccessToken(self.access_token)
+            else:
+                raise PocketException(
+                    f'{http_exception.code} - {http_exception.reason}: {http_exception.msg}')
         return resp
 
 class DataClassJSONEncoder(json.JSONEncoder):
@@ -256,3 +268,10 @@ class InvalidConsumerKey(PocketException):
     def __init__(self, consumer_key):
         self.consumer_key = consumer_key
         super().__init__(f'Invalid consumer key: "{consumer_key}"')
+
+class InvalidAccessToken(PocketException):
+    """Invalid Access Token Exception"""
+    access_token = None
+    def __init__(self, access_token):
+        self.access_token = access_token
+        super().__init__(f'The provided "{access_token}" is invalid')
