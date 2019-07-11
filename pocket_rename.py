@@ -4,6 +4,7 @@
 
 import json
 import sys
+import asyncio
 import pocket
 
 CONFIG_FILE_PATH = 'config.json'
@@ -24,49 +25,67 @@ def get_article_string(item: pocket.Article) -> str:
         title = f'{item.given_title}: '
     return f'{title}{item.resolved_url}'
 
-if __name__ == "__main__":
-    with open(CONFIG_FILE_PATH, mode='r+') as f:
-        CONFIG = json.load(f)
+def get_article_selection(num_articles: int) -> int:
+    """Prompts the user to select an article from the list
+    and returns the selected list index
+
+    Arguments:
+        num_articles {int} -- Number of articles
+
+    Returns:
+        int -- Selected list index
+    """
+    selected_index = None
+    error_message = 'Please select a valid number from the list'
+    while selected_index is None:
+        selected_article = input('Select an article you wish to rename: (q to quit) ')
+        if selected_article is 'q':
+            sys.exit(0)
         try:
-            APP = pocket.Pocket(
-                CONFIG.get('POCKET', {}).get('consumer_key'),
-                access_token=CONFIG.get('POCKET', {}).get('access_token'))
+            selected_index = int(selected_article) - 1
+            if selected_index < 0 or selected_index >= num_articles:
+                selected_index = None
+                print(error_message)
+        except ValueError:
+            print(error_message)
+    return selected_index
+
+async def main():
+    """Main function"""
+    with open(CONFIG_FILE_PATH, mode='r+') as file:
+        config = json.load(file)
+        try:
+            app = pocket.Pocket(
+                config.get('POCKET', {}).get('consumer_key'),
+                access_token=config.get('POCKET', {}).get('access_token'))
+            await app.authorize()
         except pocket.PocketException as pocket_exception:
             print(f'Error authenticating with pocket: {pocket_exception}')
             sys.exit(1)
         except Exception as exception:
             print(f'An unknown error occured: {exception}')
             sys.exit(1)
-        CONFIG['POCKET']['access_token'] = APP.access_token
+        config['POCKET']['access_token'] = app.access_token
         # Seek to the beginning to overwrite the existing config
         # Otherwise json.dump would just append,
         # because we have read at the beginning and moved the stream position
-        f.seek(0)
-        json.dump(CONFIG, f, indent=4)
+        file.seek(0)
+        json.dump(config, file, indent=4)
     while True:
-        ARTICLES = APP.get_articles()
+        articles = await app.get_articles()
         print('Articles in list:')
         # +1 so the displayed numbmering starts at 1
-        for idx, article in enumerate(ARTICLES):
-            ARTICLE_STRING = get_article_string(article)
-            print(f'{idx+1}. {ARTICLE_STRING}')
-        SELECTED_INDEX = None
-        ERROR_MESSAGE = 'Please select a valid number from the list'
-        while SELECTED_INDEX is None:
-            SELECTED_ARTICLE = input('Select an article you wish to rename: (q to quit) ')
-            if SELECTED_ARTICLE is 'q':
-                sys.exit(0)
-            try:
-                SELECTED_INDEX = int(SELECTED_ARTICLE) - 1
-                if SELECTED_INDEX < 0 or SELECTED_INDEX >= len(ARTICLES):
-                    SELECTED_INDEX = None
-                    print(ERROR_MESSAGE)
-            except ValueError as error:
-                print(ERROR_MESSAGE)
-        SELECTED_ARTICLE = ARTICLES[SELECTED_INDEX]
-        ARTICLE_STRING = get_article_string(SELECTED_ARTICLE)
-        print(f'Selected article: {ARTICLE_STRING}')
-        NEW_NAME = None
-        while not NEW_NAME:
-            NEW_NAME = input("Enter a new name: ")
-        APP.rename_article(SELECTED_ARTICLE, NEW_NAME)
+        for idx, article in enumerate(articles):
+            article_string = get_article_string(article)
+            print(f'{idx+1}. {article_string}')
+        selected_index = get_article_selection(len(articles))
+        selected_article = articles[selected_index]
+        article_string = get_article_string(selected_article)
+        print(f'Selected article: {article_string}')
+        new_name = None
+        while not new_name:
+            new_name = input("Enter a new name: ")
+        await app.rename_article(selected_article, new_name)
+
+if __name__ == "__main__":
+    asyncio.run(main())
