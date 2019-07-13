@@ -258,14 +258,17 @@ async def tui_init(app):
 
 async def main():
     """Main function"""
+    ui = None
+    app = None
     with open(CONFIG_FILE_PATH, mode='r+') as file:
         config = json.load(file)
-        app = None
         try:
             app = pocket.Pocket(
                 config.get('POCKET', {}).get('consumer_key'),
                 access_token=config.get('POCKET', {}).get('access_token'))
             await app.authorize()
+            use_tui = config.get('APP', {}).get('use_tui', True)
+            ui = tui_init if CURSES_AVAILABLE and use_tui else cli
         except pocket.PocketException as pocket_exception:
             print(f'Error authenticating with pocket: {pocket_exception}')
             sys.exit(1)
@@ -278,7 +281,7 @@ async def main():
         # because we have read at the beginning and moved the stream position
         file.seek(0)
         json.dump(config, file, indent=4)
-    ui = tui_init if CURSES_AVAILABLE else cli
+    
     await ui(app)
 
 if __name__ == "__main__":
