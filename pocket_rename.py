@@ -122,10 +122,14 @@ def tui_get_new_name(screen, old_name_str: str) -> str:
     Returns:
         str -- The entered new name
     """
-    screen.addstr('Old name: ', curses.A_BOLD)
+    _, num_cols = screen.getmaxyx()
+    lbl_old_name = 'Old name: '
+    max_str_len = num_cols - len(lbl_old_name)-1
+    if len(old_name_str) > max_str_len:
+        old_name_str = old_name_str[:max_str_len-3] + '...'
+    screen.addstr(lbl_old_name, curses.A_BOLD)
     screen.addstr(f'{old_name_str}\n')
     screen.addstr('Enter a new name: ')
-    curses.curs_set(1)
     curses.echo()
     screen.refresh()
     return screen.getstr(1, 18)
@@ -139,8 +143,6 @@ async def tui(screen, app: pocket.Pocket):
     """
     col = 2
     row = 1
-    # Cursor off
-    curses.curs_set(0)
 
     # Display the loading animation while loading the articles
     loading_tui = asyncio.create_task(
@@ -169,7 +171,7 @@ async def tui(screen, app: pocket.Pocket):
     up_keys = (curses.KEY_UP, curses.KEY_A2 if 'KEY_A2' in curses_functions else None)
     left_keys = (curses.KEY_LEFT, curses.KEY_B1 if 'KEY_B1' in curses_functions else None)
     right_keys = (curses.KEY_RIGHT, curses.KEY_B3 if 'KEY_B3' in curses_functions else None)
-    enter_keys = (curses.PADENTER, curses.KEY_ENTER, 13)
+    enter_keys = (curses.PADENTER if 'PADENTER' in curses_functions else None, curses.KEY_ENTER, 13, 10)
     while True:
         key = pad.getch()
         if key in down_keys and row < num_articles:
@@ -202,20 +204,23 @@ async def tui(screen, app: pocket.Pocket):
             pad_row = 0
             pad.refresh(pad_row, 0, 0, 0, num_rows-1, num_cols-1)
             screen.refresh()
-            new_name = tui_get_new_name(screen, str(articles[row-1])).decode('utf-8')
-            screen.clear()
-            screen.refresh()
-            # Rename article
-            loading_tui = asyncio.create_task(
-                tui_print_loading(screen, 'Renaming article'))
-            rename_task = asyncio.create_task(
-                app.rename_article(articles[row-1], new_name))
-            await rename_task
-            # Reload and display new list
-            article_task = asyncio.create_task(
-                app.get_articles())
-            articles = await article_task
-            loading_tui.cancel()
+            try:
+                new_name = tui_get_new_name(screen, str(articles[row-1])).decode('utf-8')
+                screen.clear()
+                screen.refresh()
+                # Rename article
+                loading_tui = asyncio.create_task(
+                    tui_print_loading(screen, 'Renaming article'))
+                rename_task = asyncio.create_task(
+                    app.rename_article(articles[row-1], new_name))
+                await rename_task
+                # Reload and display new list
+                article_task = asyncio.create_task(
+                    app.get_articles())
+                articles = await article_task
+                loading_tui.cancel()
+            except KeyboardInterrupt:
+                pass
             screen.clear()
             screen.refresh()
             row = 1
@@ -230,7 +235,6 @@ async def tui_init(app):
         app {pocket.Pocket} -- The pocket instance
     """
     screen = curses.initscr()
-    curses.def_shell_mode()
     curses.start_color()
     curses.raw()
     curses.cbreak()
@@ -246,8 +250,6 @@ async def tui_init(app):
         curses.noraw()
         curses.nocbreak()   # Turn off cbreak mode
         curses.echo()       # Turn echo back on
-        curses.curs_set(1)  # Turn cursor back on
-        curses.reset_shell_mode()
         curses.endwin()
 
 async def main():
@@ -272,7 +274,6 @@ async def main():
         # because we have read at the beginning and moved the stream position
         file.seek(0)
         json.dump(config, file, indent=4)
-    #await tui_init(app)
     UI = tui_init if CURSES_AVAILABLE else cli
     await UI(app)
 
