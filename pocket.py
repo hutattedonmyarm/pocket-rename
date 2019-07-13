@@ -35,6 +35,16 @@ class Article:
     tags: List[str]
     time_added: str
 
+    def get_title(self):
+        title = '<Unnamed>'
+        if self.resolved_title:
+            title =  self.resolved_title
+        elif self.given_title:
+            title = self.given_title
+        return title
+    def __str__(self):
+        return f'{self.get_title()}: {self.resolved_url}'
+
 class Pocket:
     """Provides access to the Pocket API"""
     consumer_key = None
