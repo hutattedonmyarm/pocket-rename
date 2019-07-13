@@ -54,6 +54,7 @@ async def tui_print_loading(screen, message: str = 'Loading'):
     Keyword Arguments:
         message {str} -- The loading message (default: {'Loading'})
     """
+    curses.curs_set(0)
     num_dots = 2
     while True:
         dots = '.' * num_dots
@@ -131,8 +132,11 @@ def tui_get_new_name(screen, old_name_str: str) -> str:
     screen.addstr(f'{old_name_str}\n')
     screen.addstr('Enter a new name: ')
     curses.echo()
+    curses.curs_set(1)
     screen.refresh()
-    return screen.getstr(1, 18)
+    new_name = screen.getstr(1, 18)
+    curses.curs_set(0)
+    return new_name
 
 async def tui(screen, app: pocket.Pocket):
     """Starts a curses TUI
@@ -274,8 +278,8 @@ async def main():
         # because we have read at the beginning and moved the stream position
         file.seek(0)
         json.dump(config, file, indent=4)
-    UI = tui_init if CURSES_AVAILABLE else cli
-    await UI(app)
+    ui = tui_init if CURSES_AVAILABLE else cli
+    await ui(app)
 
 if __name__ == "__main__":
     asyncio.run(main())
