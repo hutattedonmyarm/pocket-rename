@@ -1,19 +1,18 @@
 #!/usr/bin/env python
 
 '''Small tool to rename items in your pocket list'''
-
-CURSES_AVAILABLE = True
-
 import json
 import sys
 import asyncio
 from typing import List
+import pocket
+import logging
+CURSES_AVAILABLE = True
 try:
     import curses
 except Exception:
     CURSES_AVAILABLE = False
-    print('Courses is not installed, switchign to CLI', file=sys.stderr)
-import pocket
+    print('Courses is not installed, switching to CLI', file=sys.stderr)
 
 Articles = List[pocket.Article]
 
@@ -260,6 +259,7 @@ async def main():
     """Main function"""
     ui = None
     app = None
+    logging.info(f'Config file: {CONFIG_FILE_PATH}')
     with open(CONFIG_FILE_PATH, mode='r+') as file:
         config = json.load(file)
         try:
@@ -270,9 +270,11 @@ async def main():
             use_tui = config.get('APP', {}).get('use_tui', True)
             ui = tui_init if CURSES_AVAILABLE and use_tui else cli
         except pocket.PocketException as pocket_exception:
+            logging.error(f'Error authenticating with pocket: {pocket_exception}')
             print(f'Error authenticating with pocket: {pocket_exception}')
             sys.exit(1)
         except Exception as exception:
+            logging.error(f'An unknown error occured: {exception}')
             print(f'An unknown error occured: {exception}')
             sys.exit(1)
         config['POCKET']['access_token'] = app.access_token
@@ -281,8 +283,9 @@ async def main():
         # because we have read at the beginning and moved the stream position
         file.seek(0)
         json.dump(config, file, indent=4)
-    
+
     await ui(app)
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S', filename='pocket.log')
     asyncio.run(main())

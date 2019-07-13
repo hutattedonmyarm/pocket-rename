@@ -11,8 +11,9 @@ import dataclasses
 import webbrowser
 import json
 import asyncio
+import logging
+from enum import Flag, auto
 import requests
-
 BASE_URL = 'https://getpocket.com/v3'
 
 REQUEST_TOKEN_URL = '/oauth/request'
@@ -21,8 +22,19 @@ AUTHORIZE_REQUEST_TOKEN = '/oauth/authorize'
 
 REDIRECT_URI = 'https://github.com/hutattedonmyarm/pocket-rename'
 
+LOGGER = logging.getLogger(__name__)
+
 Parameter = Dict[str, str]
 Bytes = List[bytes]
+
+
+class RenameStatus(Flag):
+    UNCHANGED = auto()
+    SUCCESS = auto()
+    WARN_TIMESTAMP = auto()
+    WARN_NAME_NOT_CHANGED = auto()
+    ERR_DELETE_FAILED = auto()
+    ERR_READD_FAILED = auto()
 
 @dataclasses.dataclass
 class Article:
@@ -34,14 +46,21 @@ class Article:
     resolved_title: str
     tags: List[str]
     time_added: str
+    rename_status: RenameStatus = RenameStatus.UNCHANGED
 
-    def get_title(self):
+    def get_title(self) -> str:
+        """Returns the title of the article
+
+        Returns:
+            str -- The article title
+        """
         title = '<Unnamed>'
         if self.resolved_title:
-            title =  self.resolved_title
+            title = self.resolved_title
         elif self.given_title:
             title = self.given_title
         return title
+
     def __str__(self):
         return f'{self.get_title()}: {self.resolved_url}'
 
@@ -51,6 +70,7 @@ class Pocket:
     access_token = None
     username = None
     request_token = None
+
     def __init__(self, consumer_key, access_token=None):
         self.consumer_key = consumer_key
         self.access_token = access_token
@@ -134,14 +154,15 @@ class Pocket:
         title = article_data.get('resolved_title')
         if not title:
             title = article_data.get('title')
-
+        rename_status = article_data.get('rename_status', RenameStatus.UNCHANGED)
         return Article(item_id,
                        article_data['given_url'],
                        article_data['resolved_url'],
                        article_data.get('given_title'),
                        title,
                        [*article_data.get('tags', {})],
-                       article_data.get('time_added'))
+                       article_data.get('time_added'),
+                       rename_status)
 
     async def get_articles(self, state: str = 'unread') -> List[Article]:
         """Fetches all unread items from pocket
@@ -181,9 +202,14 @@ class Pocket:
         tags = article.tags
         url = article.resolved_url if clean_url else article.given_url
         time_added = article.time_added
-        await self.remove_item(article)
-        return await self.add_item(url, new_name, tags, time_added)
-
+        new_article = await self.add_item(url, new_name, tags, time_added)
+        if RenameStatus.UNCHANGED in new_article.rename_status:
+            new_article.rename_status |= RenameStatus.SUCCESS
+            new_article.rename_status &= ~RenameStatus.UNCHANGED
+            if new_article.get_title() == article.get_title():
+                new_article.rename_status |= RenameStatus.WARN_NAME_NOT_CHANGED
+        LOGGER.debug(f'Rename status: {new_article.rename_status}')
+        return new_article
 
     async def add_tags(self, article: Article, tags: List[str]) -> bool:
         """Adds tags to an article
@@ -229,6 +255,7 @@ class Pocket:
             Article -- The newly added Pocket article
         """
         params = {'url': url}
+        rename_status = RenameStatus.UNCHANGED
         if title:
             params['title'] = title
         if tags:
@@ -237,11 +264,19 @@ class Pocket:
             params['time'] = time_added
             # Adding with a timestamp is only possible using the /send endpoint,
             # and not the /add endpoint
-            return await self._add_item_timestamp(params)
+            try:
+                resp = await self._add_item_timestamp(params)
+                return resp
+            except ActionError as action_error:
+                LOGGER.warn(f'Error adding an item with the old timestamp. Trying again without that')
+                del params['time']
+                rename_status = RenameStatus.WARN_TIMESTAMP
+            
         # The item returned by the /add endpoint is different from the regular one
         # Might be better to go agains Pocket's recommendation and also use the /send endpoint here
         resp = await self._make_request('/add', params)
         item = json.loads(resp.text)['item']
+        item['rename_status'] = rename_status
         return self._parse_article(item['item_id'], item)
 
     async def _add_item_timestamp(self, params: Dict[str, str]) -> Article:
@@ -264,7 +299,11 @@ class Pocket:
         params = {'actions': [action]}
         resp = await self._make_request('/send', params)
         resp_text = resp.text
-        return json.loads(resp_text)['action_results']
+        resp_dict = json.loads(resp_text)
+        if any(resp_dict.get('action_errors', [])):
+            LOGGER.error(f'Error sending an action to Pocket: {resp_dict["action_errors"]}')
+            raise ActionError(action_name, resp_dict['action_errors'])
+        return resp_dict['action_results']
 
     async def _make_request(self,
                             endpoint: str,
@@ -287,6 +326,9 @@ class Pocket:
         }
         request_headers.update(headers)
         data = json.dumps(params).encode('utf-8')
+        LOGGER.debug(f'Network request to {url}')
+        LOGGER.debug(f'Body: {parameters}')
+        LOGGER.debug(f'Headers: {request_headers}')
         try:
             # Requests is blocking, so it's run like that
             loop = asyncio.get_event_loop()
@@ -299,11 +341,18 @@ class Pocket:
                 data,
                 request_headers)
         except urllib_error.HTTPError as http_exception:
+            logger.error(f'Network error: {http_exception.code} - {http_exception.reason}: {http_exception.msg}')
             if http_exception.code == 401:
                 raise InvalidAccessToken(self.access_token)
             else:
                 raise PocketException(
                     f'{http_exception.code} - {http_exception.reason}: {http_exception.msg}')
+        LOGGER.debug(f'Response Headers: {resp.headers}')
+        LOGGER.debug(f'Response Encoding: {resp.encoding}')
+        LOGGER.debug(f'Response Status: {resp.status_code }')
+        if not endpoint == '/get' or 'count' in parameters:
+            LOGGER.debug(f'Response Text: {resp.text}')
+            LOGGER.debug(f'Response JSON: {resp.json()}')
         return resp
 
 class DataClassJSONEncoder(json.JSONEncoder):
@@ -329,3 +378,11 @@ class InvalidAccessToken(PocketException):
     def __init__(self, access_token):
         self.access_token = access_token
         super().__init__(f'The provided "{access_token}" is invalid')
+
+class ActionError(PocketException):
+    """The action endpoint reported an error"""
+    action = None
+    error = None
+    def __init__(self, action, error):
+        self.action = action
+        super().__init__(f'The action "{action}" threw an error: {error}')
