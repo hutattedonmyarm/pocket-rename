@@ -5,7 +5,7 @@ This is a small tool to rename items in your pocket list.
 
 Pocket does not natively support this, and neither does the API. So this works by removing the selected item and re-adding it with the entered title.
 
-**Note that this method coems with two huge caveats:**
+**Note that this method comes with two huge caveats:**
 * **If something goes wrong while re-adding the item is deleted.** Currently there is no error handling for this, but it's on my TODO list. See #4
 * **Pocket ignores the provided title when it is able to parse its own, so it keep the old title.**. Currently there is no feedback about this. See #5
 
